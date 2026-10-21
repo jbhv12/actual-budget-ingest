@@ -11,20 +11,25 @@ function detectBank(text) {
   return null;
 }
 
-export async function ingestPdf(pdfPath, {
+function bankFromFilename(filename) {
+  if (!filename) return null;
+  const base = path.basename(filename);
+  return /^(hdfc|icici|stanc)/i.exec(base)?.[1]?.toLowerCase() || null;
+}
+
+export async function ingestBuffer(buf, {
   env = process.env,
   dryRun = false,
   force = false,
   banksConfigPath,
+  filenameHint = null,
 } = {}) {
   const banksRaw = await loadBanksConfig(banksConfigPath);
   const banksConfig = interpolateEnv(banksRaw, env);
 
-  const buf = await readFile(pdfPath);
-
-  const bankByFilename = /^(hdfc|icici|stanc)/i.exec(path.basename(pdfPath))?.[1]?.toLowerCase();
+  const bankByFilename = bankFromFilename(filenameHint);
   const guesses = bankByFilename
-    ? [bankByFilename]
+    ? [bankByFilename, ...Object.keys(banksConfig).filter((b) => b !== bankByFilename)]
     : Object.keys(banksConfig);
 
   let text;
@@ -86,7 +91,7 @@ export async function ingestPdf(pdfPath, {
   }));
 
   if (dryRun) {
-    return { bank, accountId, count: payload.length, reconcile: rec, transactions: payload, pushed: false };
+    return { bank, accountId, statement, count: payload.length, reconcile: rec, transactions: payload, pushed: false };
   }
 
   await postTransactions({
@@ -95,7 +100,12 @@ export async function ingestPdf(pdfPath, {
     transactions: payload,
   });
 
-  return { bank, accountId, count: payload.length, reconcile: rec, pushed: true };
+  return { bank, accountId, statement, count: payload.length, reconcile: rec, pushed: true };
+}
+
+export async function ingestPdf(pdfPath, opts = {}) {
+  const buf = await readFile(pdfPath);
+  return ingestBuffer(buf, { ...opts, filenameHint: opts.filenameHint ?? pdfPath });
 }
 
 export async function moveToProcessed(pdfPath, baseDir, period) {
