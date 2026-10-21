@@ -4,18 +4,17 @@ on:
   push:
     branches: [main]
     paths:
-      - 'api-scripts/**'
       - 'ingest/**'
       - 'deploy/fly/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
       app:
-        description: 'Which app to deploy (server|api|ingest|all)'
+        description: 'Which app to deploy (server|ingest|all)'
         required: true
         default: 'all'
         type: choice
-        options: [all, server, api, ingest]
+        options: [all, server, ingest]
 
 concurrency:
   group: fly-deploy
@@ -32,26 +31,9 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-  deploy-api:
-    if: ${{ github.event_name == 'push' || github.event.inputs.app == 'all' || github.event.inputs.app == 'api' }}
-    needs: deploy-server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Deploy api
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          flyctl deploy --remote-only \
-            -c deploy/fly/actual-api/fly.toml \
-            --app ${{ vars.FLY_APP_PREFIX }}-api \
-            --dockerfile api-scripts/Dockerfile \
-            api-scripts
-
   deploy-ingest:
     if: ${{ github.event_name == 'push' || github.event.inputs.app == 'all' || github.event.inputs.app == 'ingest' }}
-    needs: deploy-api
+    needs: deploy-server
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
