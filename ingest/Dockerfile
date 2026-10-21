@@ -4,10 +4,12 @@ RUN apk add --no-cache qpdf
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY src ./src
 COPY banks.yaml ./banks.yaml
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-CMD ["node", "src/ingest-watch.js"]
+CMD ["/app/entrypoint.sh"]

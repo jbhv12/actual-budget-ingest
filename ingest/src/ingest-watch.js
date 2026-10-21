@@ -6,12 +6,12 @@ import { ingestPdf, moveToFailed, moveToProcessed } from './pipeline.js';
 const WATCH_DIR = process.env.INGEST_WATCH_DIR || '/data/pdfs';
 const SOURCE = process.env.INGEST_SOURCE || 'folder';
 
-if (SOURCE === 'gmail') {
-  console.error('[watch] INGEST_SOURCE=gmail is a v2 feature and not yet implemented. Set INGEST_SOURCE=folder.');
+if (SOURCE !== 'folder') {
+  console.error(`[watch] this entry point only handles INGEST_SOURCE=folder (got "${SOURCE}"). For gmail, use ingest-once-gmail.js (entrypoint.sh routes automatically).`);
   process.exit(1);
 }
 
-console.log(`[watch] source=${SOURCE} dir=${WATCH_DIR}`);
+console.log(`[watch] source=folder dir=${WATCH_DIR}`);
 
 async function handle(pdfPath) {
   console.log(`[watch] ${pdfPath}`);

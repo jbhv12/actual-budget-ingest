@@ -40,8 +40,15 @@ services:
       - ACTUAL_API_URL=http://actual_api:5007
       - GEMINI_API_KEY=${GEMINI_API_KEY:?GEMINI_API_KEY must be set in .env}
       - HDFC_PDF_PASSWORD=${HDFC_PDF_PASSWORD:?HDFC_PDF_PASSWORD must be set in .env}
+      - HDFC_SAVINGS_ACCOUNT_ID=${HDFC_SAVINGS_ACCOUNT_ID:-}
       - INGEST_SOURCE=${INGEST_SOURCE:-folder}
       - INGEST_WATCH_DIR=/data/pdfs
+      # Gmail connector (optional, only used when INGEST_SOURCE=gmail)
+      - GMAIL_CLIENT_ID=${GMAIL_CLIENT_ID:-}
+      - GMAIL_CLIENT_SECRET=${GMAIL_CLIENT_SECRET:-}
+      - GMAIL_REFRESH_TOKEN=${GMAIL_REFRESH_TOKEN:-}
+      - GMAIL_LABEL=${GMAIL_LABEL:-actual-ingest}
+      - GMAIL_POLL_INTERVAL_SEC=${GMAIL_POLL_INTERVAL_SEC:-900}
     volumes:
       - ./fixtures/pdfs:/data/pdfs
       - ./ingest/banks.yaml:/app/banks.yaml:ro
