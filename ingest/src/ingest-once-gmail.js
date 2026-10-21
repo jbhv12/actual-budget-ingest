@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-// One-shot Gmail poll: list messages with the ingest label, process each
-// PDF attachment through ingestBuffer(), ack via label change. Exits when
-// done — suitable for a cron / Fly scheduled machine.
-
 import { ingestBuffer } from './pipeline.js';
 import {
   createGmailClient,

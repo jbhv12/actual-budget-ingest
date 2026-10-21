@@ -43,7 +43,6 @@ services:
       - HDFC_SAVINGS_ACCOUNT_ID=${HDFC_SAVINGS_ACCOUNT_ID:-}
       - INGEST_SOURCE=${INGEST_SOURCE:-folder}
       - INGEST_WATCH_DIR=/data/pdfs
-      # Gmail connector (optional, only used when INGEST_SOURCE=gmail)
       - GMAIL_CLIENT_ID=${GMAIL_CLIENT_ID:-}
       - GMAIL_CLIENT_SECRET=${GMAIL_CLIENT_SECRET:-}
       - GMAIL_REFRESH_TOKEN=${GMAIL_REFRESH_TOKEN:-}

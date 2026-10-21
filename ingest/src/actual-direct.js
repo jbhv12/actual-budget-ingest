@@ -1,7 +1,3 @@
-// Direct push to the Actual Budget sync server using @actual-app/api.
-// Used in production (on Fly) so we don't need a separate actual_api service.
-// Local docker-compose still uses the REST wrapper for curl-friendly dev.
-
 import * as actual from '@actual-app/api';
 import fs from 'node:fs';
 
