@@ -1,0 +1,27 @@
+# Secrets
+.env
+.env.local
+*.secret
+
+# Dependencies
+node_modules/
+
+# Runtime data (contains sqlite with password hashes, synced budget)
+actual-data/
+api-scripts/budget-cache/
+
+# User-dropped PDFs and their processed/failed state
+fixtures/pdfs/*.pdf
+fixtures/pdfs/processed/
+fixtures/pdfs/failed/
+
+# OAuth tokens scratched out by get-gmail-refresh-token.sh
+gmail-token.json
+
+# OS cruft
+.DS_Store
+*.swp
+
+# Editor
+.idea/
+.vscode/

@@ -1,0 +1,17 @@
+{
+  "name": "actual-ingest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "watch": "node src/ingest-watch.js",
+    "once": "node src/ingest-once.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "chokidar": "^4.0.1",
+    "pdf-parse": "^1.1.1",
+    "yaml": "^2.6.0",
+    "zod": "^3.23.8"
+  }
+}
