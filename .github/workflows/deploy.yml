@@ -1,0 +1,67 @@
+name: Deploy to Fly
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api-scripts/**'
+      - 'ingest/**'
+      - 'deploy/fly/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'Which app to deploy (server|api|ingest|all)'
+        required: true
+        default: 'all'
+        type: choice
+        options: [all, server, api, ingest]
+
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-server:
+    if: ${{ github.event_name == 'push' || github.event.inputs.app == 'all' || github.event.inputs.app == 'server' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only -c deploy/fly/actual-server/fly.toml --app ${{ vars.FLY_APP_PREFIX }}-server
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-api:
+    if: ${{ github.event_name == 'push' || github.event.inputs.app == 'all' || github.event.inputs.app == 'api' }}
+    needs: deploy-server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy api
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --remote-only \
+            -c deploy/fly/actual-api/fly.toml \
+            --app ${{ vars.FLY_APP_PREFIX }}-api \
+            --dockerfile api-scripts/Dockerfile \
+            api-scripts
+
+  deploy-ingest:
+    if: ${{ github.event_name == 'push' || github.event.inputs.app == 'all' || github.event.inputs.app == 'ingest' }}
+    needs: deploy-api
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy ingest
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --remote-only \
+            -c deploy/fly/actual-ingest/fly.toml \
+            --app ${{ vars.FLY_APP_PREFIX }}-ingest \
+            --dockerfile ingest/Dockerfile \
+            ingest

@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            api-scripts/package-lock.json
+            ingest/package-lock.json
+
+      - name: Install api-scripts deps
+        working-directory: api-scripts
+        run: npm ci
+
+      - name: Install ingest deps
+        working-directory: ingest
+        run: npm ci
+
+      - name: Syntax check ingest sources
+        working-directory: ingest
+        run: |
+          for f in src/*.js; do node -c "$f" || exit 1; done
+
+      - name: docker compose config
+        env:
+          ACTUAL_PASSWORD: ci-placeholder
+          ACTUAL_SYNC_ID: ci-placeholder
+          GEMINI_API_KEY: ci-placeholder
+          HDFC_PDF_PASSWORD: ci-placeholder
+        run: docker compose config >/dev/null
+
+      - name: Shellcheck scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -yqq shellcheck
+          shellcheck scripts/*.sh
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
