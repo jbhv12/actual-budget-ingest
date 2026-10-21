@@ -1,0 +1,37 @@
+# Fly app config for the ingest worker.
+# Expected name: $FLY_APP_PREFIX-ingest.
+# Runs as a scheduled machine (hourly) once Gmail connector is wired in.
+# For now (v1 folder-mode on Fly makes no sense), this is a stub that just
+# idles; override with `fly machine run --command ...` for one-off runs.
+
+primary_region = "sin"
+
+[build]
+  dockerfile = "../../../ingest/Dockerfile"
+
+# Secrets injected by `fly secrets set`:
+#   GEMINI_API_KEY, HDFC_PDF_PASSWORD,
+#   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN
+
+[env]
+  INGEST_SOURCE = "gmail"
+  GMAIL_LABEL = "actual-ingest"
+  GMAIL_POLL_INTERVAL_SEC = "900"
+  # ACTUAL_API_URL resolves to the sibling api on 6PN:
+  #   http://${FLY_APP_PREFIX}-api.internal:5007
+
+# No [[services]] block — this is a worker, not a web app.
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# Schedule: run once per hour. Fly will spin up the machine on tick,
+# the ingest process polls Gmail once and exits. Dedup via imported_id
+# makes re-runs safe.
+[processes]
+  app = "node src/ingest-once-gmail.js"
+
+# Future: convert to a scheduled machine via
+#   fly machine run --schedule hourly --app $APP ...

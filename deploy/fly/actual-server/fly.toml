@@ -1,0 +1,49 @@
+# Fly app config for the Actual Budget sync server.
+# App name is set via `fly launch --name` or `fly deploy --app`.
+# Expected name: $FLY_APP_PREFIX-server (e.g. jbhv12-actual-server).
+
+primary_region = "sin"
+
+[build]
+  image = "docker.io/actualbudget/actual-server:latest"
+
+[env]
+  ACTUAL_PORT = "5006"
+  ACTUAL_UPLOAD_FILE_SYNC_SIZE_LIMIT_MB = "20"
+  ACTUAL_UPLOAD_SYNC_ENCRYPTED_FILE_SYNC_SIZE_LIMIT_MB = "50"
+  ACTUAL_UPLOAD_FILE_SIZE_LIMIT_MB = "20"
+  # ACTUAL_PASSWORD comes from `fly secrets set`
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 5006
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+  [[services.http_checks]]
+    interval = "60s"
+    timeout = "10s"
+    grace_period = "30s"
+    method = "get"
+    path = "/"
+
+[[mounts]]
+  source = "actual_data"
+  destination = "/data"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
