@@ -15,7 +15,7 @@ follow-up (section 7); nothing in the core design depends on Fly.
 | Area | Decision | Rationale |
 |---|---|---|
 | PDF → transactions | **Gemini LLM extraction** | One prompt handles all 3 banks + future ones; resilient to layout changes. Trade-off: per-run cost + nondeterminism, mitigated by validation + dedup. |
-| Local test input | **`./fixtures/pdfs/` folder** | Drop PDFs in, pipeline picks them up. No Gmail dependency for dev. Gmail connector added later behind a flag. |
+| Local test input | **`./fixtures/pdfs/` folder** or **Gmail (`INGEST_SOURCE=gmail`)** | Folder for fast iteration without any OAuth; Gmail for the production flow once credentials are in `.env`. |
 | PDF passwords | **`.env` per bank** | `HDFC_PDF_PASSWORD`, `ICICI_PDF_PASSWORD`, `STANC_PDF_PASSWORD`. Gitignored. Maps cleanly to `fly secrets set` later. |
 | Transaction dedup | **Actual's `imported_id`** | Hash of `(bank + account_last4 + date + amount + description)`. Actual natively dedupes. No separate state store needed. |
 
@@ -230,19 +230,25 @@ Successful PDFs move to `fixtures/pdfs/processed/<YYYY-MM>/`. Failures go to
 | 5 | Multi-currency | **INR only.** Any transaction Gemini returns with a non-INR hint causes the whole PDF to fail with a currency error. |
 | 6 | Observability | **stdout logs only** for v1. No status endpoint, no Slack notifier. `docker compose logs -f actual_ingest` is the observability surface. |
 
-### Still-open (deferred to v2, not blocking v1)
+### Shipped in v1
+
+- **Folder source** (`INGEST_SOURCE=folder`): chokidar watch on `fixtures/pdfs/`.
+- **Gmail source** (`INGEST_SOURCE=gmail`): OAuth refresh-token flow, polls the
+  `actual-ingest` label every `GMAIL_POLL_INTERVAL_SEC`, downloads PDF
+  attachments, swaps labels to `actual-ingest/done` or `actual-ingest/failed`.
+  See `ingest/src/sources/gmail.js` and `ingest/src/ingest-once-gmail.js`.
+- **Entrypoint router** (`ingest/entrypoint.sh`) switches between the two
+  sources via `INGEST_SOURCE`. On Fly, `[processes]` in `fly.toml` runs the
+  one-shot Gmail poller directly so the scheduled machine exits cleanly.
+
+### Still-open (nice-to-have, not blocking)
 
 - **Category inference.** Transactions land uncategorized. User categorizes in UI.
-- **Gmail connector.** Design placeholder in section 3.1; v1 reads from
-  `./fixtures/pdfs/` only.
 - **Account-to-ID bootstrap.** User creates one HDFC account manually in the UI,
-  then edits `banks.yaml` with the UUID from `curl :5007/accounts`. An `ingest init`
-  command could automate this but is not v1.
+  then edits `banks.yaml` with the UUID from `curl :5007/accounts` (or exports
+  it as `HDFC_SAVINGS_ACCOUNT_ID` and relies on env interpolation).
 - **Retention policy.** Processed PDFs stay in `processed/<YYYY-MM>/` indefinitely.
   Housekeeping is manual.
-- **"Serverless" terminology.** For Fly: `actual_ingest` becomes a scheduled Fly
-  machine, not FaaS. v1 runs as a long-lived container; the pipeline function is
-  the same.
 
 ---
 
