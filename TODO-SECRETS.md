@@ -1,105 +1,68 @@
 # Secrets setup checklist
 
-The things you (the human) run from a shell. Nothing here goes into git.
-Everything is CLI; no console except where Google forces it (section 2).
+Steps you run from a shell. Nothing here is committed. Requires `gh`, `fly`,
+`gcloud`, `jq`, `openssl` installed and logged in.
 
-Assumes you have `gh`, `fly`, `gcloud`, `jq` installed and logged in.
-
----
-
-## 0. Variables used throughout
+## 0. Shared variables
 
 ```bash
 export GCP_PROJECT_ID="actual-ingest-$USER"
-export FLY_APP_PREFIX="$USER-actual"            # used for all 3 fly apps
-export GITHUB_REPO="$USER/actual-ingest"        # owner/name of your public repo
+export FLY_APP_PREFIX="$USER-actual"
+export GITHUB_REPO="$USER/actual-ingest"
 ```
 
----
-
-## 1. Local dev secrets (`.env`)
+## 1. Local `.env`
 
 ```bash
 cp .env.example .env
-# Edit .env — fill in:
-#   ACTUAL_PASSWORD        (pick a strong password; used by server + API wrapper)
-#   ACTUAL_SYNC_ID         (filled in after step 4 below)
-#   GEMINI_API_KEY         (https://aistudio.google.com/apikey)
-#   HDFC_PDF_PASSWORD      (HDFC statement password; convention: first 4 letters
-#                           of name uppercase + DDMM of DOB, e.g. JOHN0105)
+# Fill in ACTUAL_PASSWORD, GEMINI_API_KEY, HDFC_PDF_PASSWORD.
+# ACTUAL_SYNC_ID + HDFC_SAVINGS_ACCOUNT_ID come later (steps 4+5).
 ```
 
-`.env` is gitignored. Never commit it.
+## 2. GCP + Gmail OAuth
 
----
-
-## 2. GCP + Gmail OAuth (one-time, needed for v2 Gmail connector only)
+Only needed for `INGEST_SOURCE=gmail`. Skip to section 4 if you'll test with
+the folder source first.
 
 ```bash
 ./scripts/bootstrap-gcp.sh
 ```
 
-This creates the project and enables Gmail API. It will then print the
-**one unavoidable manual step** — about 2 minutes in the GCP Console to
-create the OAuth consent screen (user type: Internal) and OAuth 2.0
-Client ID (type: Desktop app). Follow the printed URL.
-
-After the console step, copy the client id and secret, then:
+Follow the printed console link to create the OAuth consent screen (user
+type: Internal) and OAuth 2.0 Client ID (type: Desktop app). Then:
 
 ```bash
 export GMAIL_CLIENT_ID='<from console>'
 export GMAIL_CLIENT_SECRET='<from console>'
-./scripts/get-gmail-refresh-token.sh    # opens browser, writes refresh token to stdout
-# -> copy the printed refresh token
+export GMAIL_REFRESH_TOKEN="$(./scripts/get-gmail-refresh-token.sh)"
 ```
 
----
-
-## 3. GitHub Actions secrets (for CI/CD deploys)
-
-Only one is strictly required: `FLY_API_TOKEN`. Everything else lives in
-Fly secrets, not GitHub, so the deploy workflow never sees them.
+## 3. GitHub secrets
 
 ```bash
-# Generate a scoped Fly API token for CI
 fly tokens create deploy -x 999999h > /tmp/fly-token
 gh secret set FLY_API_TOKEN --repo "$GITHUB_REPO" < /tmp/fly-token
 rm /tmp/fly-token
 
-# Non-secret variable (interpolated into fly.toml app names)
 gh variable set FLY_APP_PREFIX --repo "$GITHUB_REPO" --body "$FLY_APP_PREFIX"
 ```
 
----
-
-## 4. Fly apps + volume (one-time)
+## 4. Fly apps + first server deploy
 
 ```bash
-./scripts/bootstrap-fly.sh
-```
+./scripts/bootstrap-fly.sh                        # creates 2 apps + volume
 
-Creates `$FLY_APP_PREFIX-server`, `-api`, `-ingest`, plus a 1GB volume
-for the server's `/data`.
+ACTUAL_PASSWORD=$(openssl rand -hex 24)
+echo "ACTUAL_PASSWORD=$ACTUAL_PASSWORD" >> .env
 
-Then do the first server deploy (needed before you can create a budget
-and know the sync id):
-
-```bash
+fly secrets set --app "$FLY_APP_PREFIX-server" ACTUAL_PASSWORD="$ACTUAL_PASSWORD"
 fly deploy --remote-only \
   -c deploy/fly/actual-server/fly.toml \
   --app "$FLY_APP_PREFIX-server"
 ```
 
-Create a strong password and set it:
-
-```bash
-ACTUAL_PASSWORD=$(openssl rand -hex 24)
-echo "ACTUAL_PASSWORD=$ACTUAL_PASSWORD" >> .env     # also store locally
-printf '%s' "$ACTUAL_PASSWORD" | fly secrets set --app "$FLY_APP_PREFIX-server" ACTUAL_PASSWORD=- --stage
-fly deploy --remote-only -c deploy/fly/actual-server/fly.toml --app "$FLY_APP_PREFIX-server"
-```
-
-Now open the server, create your budget + HDFC account, then grab the sync id:
+Open `https://$FLY_APP_PREFIX-server.fly.dev`, create your budget + HDFC
+account in the UI, then grab the sync id and account id:
 
 ```bash
 APP_URL="https://$FLY_APP_PREFIX-server.fly.dev"
@@ -111,34 +74,13 @@ ACTUAL_SYNC_ID=$(curl -s "$APP_URL/sync/list-user-files" \
 echo "ACTUAL_SYNC_ID=$ACTUAL_SYNC_ID" >> .env
 ```
 
----
-
-## 5. Fly secrets for the API wrapper
+Account id (easiest: via local `actual_api` wrapper after local sync):
 
 ```bash
-fly secrets set --app "$FLY_APP_PREFIX-api" \
-  ACTUAL_PASSWORD="$ACTUAL_PASSWORD" \
-  ACTUAL_SYNC_ID="$ACTUAL_SYNC_ID" \
-  ACTUAL_SERVER_URL="http://${FLY_APP_PREFIX}-server.internal:5006"
-```
-
-Then deploy:
-
-```bash
-fly deploy --remote-only \
-  -c deploy/fly/actual-api/fly.toml \
-  --app "$FLY_APP_PREFIX-api" \
-  --dockerfile api-scripts/Dockerfile \
-  api-scripts
-```
-
-Grab the HDFC Actual account id (from the UI you'll create it there, or
-query the API):
-
-```bash
-HDFC_ACCOUNT_ID=$(fly ssh console --app "$FLY_APP_PREFIX-api" \
-  --command "wget -qO- http://localhost:5007/accounts" | jq -r '.[0].id')
-echo "HDFC_SAVINGS_ACCOUNT_ID=$HDFC_ACCOUNT_ID" >> .env
+docker compose up -d actual_api
+HDFC_SAVINGS_ACCOUNT_ID=$(curl -s http://localhost:5007/accounts \
+  | jq -r '.[] | select(.name == "HDFC Savings") | .id')
+echo "HDFC_SAVINGS_ACCOUNT_ID=$HDFC_SAVINGS_ACCOUNT_ID" >> .env
 ```
 
 Update `ingest/banks.yaml`:
@@ -149,72 +91,54 @@ banks:
     password_env: HDFC_PDF_PASSWORD
     markers: ["HDFC Bank"]
     accounts:
-      - last4: "1234"                                            # your HDFC last 4
-        actual_account_id: "${HDFC_SAVINGS_ACCOUNT_ID}"           # env-interpolated
+      - last4: "1234"
+        actual_account_id: "${HDFC_SAVINGS_ACCOUNT_ID}"
 ```
 
-Commit the `banks.yaml` change (safe — the UUID is only in env).
+The UUID stays in env — safe to commit this file.
 
----
-
-## 6. Fly secrets for the ingest worker
+## 5. Fly secrets for ingest
 
 ```bash
 fly secrets set --app "$FLY_APP_PREFIX-ingest" \
-  ACTUAL_API_URL="http://${FLY_APP_PREFIX}-api.internal:5007" \
-  GEMINI_API_KEY="<your Gemini key>" \
-  HDFC_PDF_PASSWORD="<your HDFC statement password>" \
-  HDFC_SAVINGS_ACCOUNT_ID="$HDFC_ACCOUNT_ID" \
+  ACTUAL_SERVER_URL="http://${FLY_APP_PREFIX}-server.internal:5006" \
+  ACTUAL_PASSWORD="$ACTUAL_PASSWORD" \
+  ACTUAL_SYNC_ID="$ACTUAL_SYNC_ID" \
+  HDFC_SAVINGS_ACCOUNT_ID="$HDFC_SAVINGS_ACCOUNT_ID" \
+  GEMINI_API_KEY="<from aistudio.google.com/apikey>" \
+  HDFC_PDF_PASSWORD="<your HDFC PDF password>" \
   GMAIL_CLIENT_ID="$GMAIL_CLIENT_ID" \
   GMAIL_CLIENT_SECRET="$GMAIL_CLIENT_SECRET" \
-  GMAIL_REFRESH_TOKEN="<from step 2>"
+  GMAIL_REFRESH_TOKEN="$GMAIL_REFRESH_TOKEN"
 ```
 
----
-
-## 7. First deploy from GitHub
-
-Everything above is one-time. After this, pushing to `main` triggers the
-deploy workflow and reconciles all three apps.
+## 6. Push + first CI deploy
 
 ```bash
 git remote add origin "git@github.com:$GITHUB_REPO.git"
 git push -u origin main
-```
-
-Watch the first deploy:
-
-```bash
 gh run watch --repo "$GITHUB_REPO"
 ```
 
----
-
-## 8. Convert ingest to a scheduled machine (post-v2 Gmail wiring)
-
-Once the Gmail connector lands, you want `actual_ingest` to run on a
-schedule, not continuously:
+## 7. Convert ingest to a scheduled machine (monthly)
 
 ```bash
-# List current machines, pick the ingest one
-fly machines list --app "$FLY_APP_PREFIX-ingest"
-# Update its schedule
-fly machine update <machine-id> \
-  --schedule hourly \
+MACHINE_ID=$(fly machines list --app "$FLY_APP_PREFIX-ingest" --json \
+  | jq -r '.[0].id')
+fly machine update "$MACHINE_ID" --schedule monthly \
   --app "$FLY_APP_PREFIX-ingest"
 ```
 
----
+After this: machine starts on the 1st of each month, polls Gmail, exits.
+Zero cost between runs. `actual-server` scale-to-zero is baked in and wakes
+on first UI request (~5-10s).
 
-## Secret rotation
+## Rotation
 
-| Secret | How to rotate |
+| Secret | Rotate via |
 |---|---|
-| `ACTUAL_PASSWORD` | `fly secrets set` on both `-server` and `-api`; redeploy |
-| `GEMINI_API_KEY` | Rotate in AI Studio, `fly secrets set` on `-ingest`, redeploy |
-| `HDFC_PDF_PASSWORD` | Just update `fly secrets set` on `-ingest`; no redeploy needed |
-| `GMAIL_REFRESH_TOKEN` | Rerun `scripts/get-gmail-refresh-token.sh`, `fly secrets set` |
+| `ACTUAL_PASSWORD` | `fly secrets set` on `-server` and `-ingest`; redeploy |
+| `GEMINI_API_KEY` | `fly secrets set` on `-ingest` |
+| `HDFC_PDF_PASSWORD` | `fly secrets set` on `-ingest` |
+| `GMAIL_REFRESH_TOKEN` | rerun `scripts/get-gmail-refresh-token.sh` + `fly secrets set` |
 | `FLY_API_TOKEN` | `fly tokens create` + `gh secret set` |
-
-Rotation of any secret is just the matching `fly secrets set` line above —
-nothing else to change in the repo.
