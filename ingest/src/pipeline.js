@@ -6,6 +6,19 @@ import { importedId, reconcile } from './dedup.js';
 import { loadBanksConfig, resolveAccount, interpolateEnv } from './config.js';
 import { postTransactions, ActualError } from './actual.js';
 
+async function pushTransactions({ env, accountId, transactions }) {
+  const mode = env.ACTUAL_PUSH_MODE || (env.ACTUAL_API_URL ? 'rest' : 'direct');
+  if (mode === 'direct') {
+    const { pushDirect } = await import('./actual-direct.js');
+    return pushDirect({ env, accountId, transactions });
+  }
+  return postTransactions({
+    apiUrl: env.ACTUAL_API_URL || 'http://actual_api:5007',
+    accountId,
+    transactions,
+  });
+}
+
 function detectBank(text) {
   if (/HDFC Bank/i.test(text)) return 'hdfc';
   return null;
@@ -94,11 +107,7 @@ export async function ingestBuffer(buf, {
     return { bank, accountId, statement, count: payload.length, reconcile: rec, transactions: payload, pushed: false };
   }
 
-  await postTransactions({
-    apiUrl: env.ACTUAL_API_URL || 'http://actual_api:5007',
-    accountId,
-    transactions: payload,
-  });
+  await pushTransactions({ env, accountId, transactions: payload });
 
   return { bank, accountId, statement, count: payload.length, reconcile: rec, pushed: true };
 }

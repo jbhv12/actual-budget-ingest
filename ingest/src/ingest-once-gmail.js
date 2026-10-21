@@ -81,10 +81,17 @@ async function main() {
   }
 
   console.log(`[gmail] done: processed=${processed} failed=${failed} skipped=${skipped}`);
-  if (failed > 0) process.exit(1);
+  return failed;
 }
 
-main().catch((err) => {
+try {
+  const failed = await main();
+  try {
+    const { shutdownDirect } = await import('./actual-direct.js');
+    await shutdownDirect();
+  } catch { /* only loaded if direct mode was used */ }
+  process.exit(failed > 0 ? 1 : 0);
+} catch (err) {
   console.error('[gmail] fatal:', err);
   process.exit(1);
-});
+}
