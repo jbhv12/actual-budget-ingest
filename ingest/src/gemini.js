@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 
+export const BUDGET_CATEGORIES = ['Essentials', 'Leisure', 'Investments', 'Maintenance'];
+
 const transactionSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'),
   description: z.string().min(1),
@@ -8,6 +10,7 @@ const transactionSchema = z.object({
   amount_paise: z.number().int(),
   balance_paise: z.number().int().nullable(),
   reference: z.string().nullable(),
+  category: z.enum([...BUDGET_CATEGORIES, 'Unknown']),
 });
 
 const statementSchema = z.object({
@@ -32,30 +35,42 @@ export class GeminiError extends Error {
 
 const PROMPT = `You are a precise parser of Indian bank statements. The user will paste the raw text extracted from an HDFC Bank statement PDF.
 
-Return a SINGLE JSON object (no markdown fence, no commentary) matching this TypeScript type:
+Return a SINGLE JSON object (no markdown fence, no commentary) matching:
 
 type Output = {
-  account_last4: string;           // last 4 digits of the account number
-  currency: "INR";                 // reject if any transaction is not INR
-  statement_period: { from: string; to: string };  // YYYY-MM-DD, inclusive
-  opening_balance_paise: number;   // integer; opening balance of the period
-  closing_balance_paise: number;   // integer; closing balance of the period
+  account_last4: string;
+  currency: "INR";
+  statement_period: { from: string; to: string };
+  opening_balance_paise: number;
+  closing_balance_paise: number;
   transactions: Array<{
-    date: string;                  // YYYY-MM-DD
-    description: string;           // raw narration from the statement, cleaned of excess whitespace
-    payee_clean: string;           // short human-readable merchant name you have inferred (e.g. "Zomato", "Amazon India", "HDFC Credit Card Payment")
-    amount_paise: number;          // integer; NEGATIVE for debits/withdrawals, POSITIVE for credits/deposits
-    balance_paise: number | null;  // running balance if present on the row, else null
-    reference: string | null;      // UPI ref, cheque number, or similar if present
+    date: string;
+    description: string;
+    payee_clean: string;
+    amount_paise: number;
+    balance_paise: number | null;
+    reference: string | null;
+    category: "Essentials" | "Leisure" | "Investments" | "Maintenance" | "Unknown";
   }>;
 };
 
-Hard rules:
-- All monetary values are in paise (integer, INR * 100). ₹1,234.56 becomes 123456.
-- Debits are NEGATIVE, credits are POSITIVE.
-- Dates are ISO (YYYY-MM-DD).
-- If you cannot determine any required field, do NOT guess. Return a JSON object with an "error" field explaining what is missing or malformed.
-- Do NOT include markdown code fences in your response.
+Rules:
+- Monetary values are paise (integer, INR * 100). ₹1,234.56 -> 123456.
+- Debits NEGATIVE, credits POSITIVE. Dates ISO (YYYY-MM-DD).
+- Return "error": "<reason>" if any required field is uncertain.
+- No markdown fences in your response.
+
+Category guide (pick one per transaction):
+- Essentials: groceries, utility bills, fuel, pharmacy, rent/EMI, mobile, internet,
+  core food. Debit transactions required for daily life.
+- Leisure: restaurants, dining out, OTT subscriptions, entertainment, travel for
+  non-work, shopping for non-essentials, hobbies, gifts.
+- Investments: SIPs, mutual-fund purchases, FD/RD, equity broker transfers,
+  insurance premiums with investment component, PPF/EPF.
+- Maintenance: home repairs, vehicle service, appliance repair, medical check-ups,
+  cleaning/pest services, bank fees, govt filings.
+- Unknown: credits/refunds, inter-account transfers, salary, interest, or any
+  transaction where none of the four categories clearly fits.
 `;
 
 export async function parseStatement(text, { apiKey, model = 'gemini-2.5-flash' } = {}) {

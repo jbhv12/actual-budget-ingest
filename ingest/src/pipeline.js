@@ -6,9 +6,22 @@ import { importedId, reconcile } from './dedup.js';
 import { loadBanksConfig, resolveAccount, interpolateEnv } from './config.js';
 import { postTransactions, ActualError } from './actual.js';
 
+function pushMode(env) {
+  return env.ACTUAL_PUSH_MODE || (env.ACTUAL_API_URL ? 'rest' : 'direct');
+}
+
+async function categoryMapIfDirect(env) {
+  if (pushMode(env) !== 'direct') return null;
+  const [{ initDirect }, { ensureCategories }] = await Promise.all([
+    import('./actual-direct.js'),
+    import('./categories.js'),
+  ]);
+  await initDirect({ env });
+  return ensureCategories();
+}
+
 async function pushTransactions({ env, accountId, transactions }) {
-  const mode = env.ACTUAL_PUSH_MODE || (env.ACTUAL_API_URL ? 'rest' : 'direct');
-  if (mode === 'direct') {
+  if (pushMode(env) === 'direct') {
     const { pushDirect } = await import('./actual-direct.js');
     return pushDirect({ env, accountId, transactions });
   }
@@ -86,22 +99,30 @@ export async function ingestBuffer(buf, {
   }
 
   const accountId = resolveAccount(banksConfig, bank, statement.account_last4);
+  const categoryMap = dryRun ? null : await categoryMapIfDirect(env);
 
-  const payload = statement.transactions.map((t) => ({
-    date: t.date,
-    amount: t.amount_paise,
-    payee_name: t.payee_clean,
-    notes: t.description,
-    imported_id: importedId({
-      bank,
-      account_last4: statement.account_last4,
+  const payload = statement.transactions.map((t) => {
+    const txn = {
       date: t.date,
-      amount_paise: t.amount_paise,
-      reference: t.reference,
-      description: t.description,
-    }),
-    cleared: true,
-  }));
+      amount: t.amount_paise,
+      payee_name: t.payee_clean,
+      notes: t.description,
+      imported_id: importedId({
+        bank,
+        account_last4: statement.account_last4,
+        date: t.date,
+        amount_paise: t.amount_paise,
+        reference: t.reference,
+        description: t.description,
+      }),
+      cleared: true,
+    };
+    if (categoryMap && t.category && t.category !== 'Unknown') {
+      const id = categoryMap[t.category];
+      if (id) txn.category = id;
+    }
+    return txn;
+  });
 
   if (dryRun) {
     return { bank, accountId, statement, count: payload.length, reconcile: rec, transactions: payload, pushed: false };
