@@ -10,6 +10,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
     "chokidar": "^4.0.1",
+    "googleapis": "^187.0.0",
     "pdf-parse": "^1.1.1",
     "yaml": "^2.6.0",
     "zod": "^3.23.8"
