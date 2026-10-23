@@ -101,28 +101,35 @@ export async function ingestBuffer(buf, {
   const accountId = resolveAccount(banksConfig, bank, statement.account_last4);
   const categoryMap = dryRun ? null : await categoryMapIfDirect(env);
 
+  let weakHashRows = 0;
   const payload = statement.transactions.map((t) => {
+    const { id, tier } = importedId({
+      bank,
+      account_last4: statement.account_last4,
+      date: t.date,
+      amount_paise: t.amount_paise,
+      reference: t.reference,
+      balance_paise: t.balance_paise,
+      description: t.description,
+    });
+    if (tier === 'description') weakHashRows++;
     const txn = {
       date: t.date,
       amount: t.amount_paise,
       payee_name: t.payee_clean,
       notes: t.description,
-      imported_id: importedId({
-        bank,
-        account_last4: statement.account_last4,
-        date: t.date,
-        amount_paise: t.amount_paise,
-        reference: t.reference,
-        description: t.description,
-      }),
+      imported_id: id,
       cleared: true,
     };
     if (categoryMap && t.category && t.category !== 'Unknown') {
-      const id = categoryMap[t.category];
-      if (id) txn.category = id;
+      const cid = categoryMap[t.category];
+      if (cid) txn.category = cid;
     }
     return txn;
   });
+  if (weakHashRows > 0) {
+    console.warn(`[pipeline] ${weakHashRows}/${payload.length} rows use description-only hash fallback; dedup is LLM-sensitive for those`);
+  }
 
   if (dryRun) {
     return { bank, accountId, statement, count: payload.length, reconcile: rec, transactions: payload, pushed: false };
