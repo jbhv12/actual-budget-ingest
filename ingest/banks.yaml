@@ -1,3 +1,8 @@
+owner:
+  name_tokens:
+    - jaykumar
+    - bhavsar
+
 banks:
   hdfc_savings:
     label: "HDFC Bank"

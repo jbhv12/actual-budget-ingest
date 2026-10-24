@@ -5,7 +5,7 @@ export async function loadBanksConfig(path = '/app/banks.yaml') {
   const text = await readFile(path, 'utf8');
   const parsed = YAML.parse(text);
   if (!parsed?.banks) throw new Error(`banks config at ${path} missing top-level 'banks' key`);
-  return parsed.banks;
+  return { banks: parsed.banks, owner: parsed.owner || { name_tokens: [] } };
 }
 
 export function accountNameFor(banksConfig, bank) {
@@ -15,6 +15,12 @@ export function accountNameFor(banksConfig, bank) {
     throw new Error(`banks.yaml[${bank}].account_name is required`);
   }
   return cfg.account_name;
+}
+
+export function isSelfTransfer({ ownerTokens, payeeClean, description }) {
+  if (!ownerTokens || ownerTokens.length === 0) return false;
+  const haystack = `${payeeClean || ''} ${description || ''}`.toLowerCase();
+  return ownerTokens.every((tok) => haystack.includes(String(tok).toLowerCase()));
 }
 
 const ENV_PATTERN = /\$\{([A-Z0-9_]+)\}/g;

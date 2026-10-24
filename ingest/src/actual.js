@@ -33,6 +33,23 @@ export async function listAccounts({ apiUrl }) {
   return resp.json();
 }
 
+export async function pushSelfTransfersRest({ apiUrl, accountId, transactions }) {
+  const resp = await fetch(`${base(apiUrl)}/transfers/push`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account_id: accountId, transactions }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok || body.error) {
+    throw new ActualError(
+      `actual_api POST /transfers/push failed: ${resp.status} ${body.error || ''}`,
+      'self-transfer-push-failed',
+      body,
+    );
+  }
+  return body;
+}
+
 export async function resolveOrCreateAccountRest({ apiUrl, name }) {
   const resp = await fetch(`${base(apiUrl)}/accounts/resolve`, {
     method: 'POST',

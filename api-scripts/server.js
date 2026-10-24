@@ -107,6 +107,90 @@ app.post('/categories/ensure', async (req, res) => {
   }
 });
 
+const PENDING_PAYEE_NAME = 'Self Transfer (unmatched)';
+
+async function getPendingPayeeId() {
+  const payees = await actual.getPayees();
+  const existing = payees.find((p) => p.name === PENDING_PAYEE_NAME);
+  if (existing) return existing.id;
+  return actual.createPayee({ name: PENDING_PAYEE_NAME });
+}
+
+function transferPayeeForAccount(payees, accountId) {
+  return payees.find((p) => p.transfer_acct === accountId)?.id || null;
+}
+
+function iso(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+async function findMirror({ otherAccountId, date, amount, pendingPayeeId, windowDays = 2 }) {
+  const d = new Date(date + 'T00:00:00Z');
+  const from = new Date(d);
+  from.setUTCDate(d.getUTCDate() - windowDays);
+  const to = new Date(d);
+  to.setUTCDate(d.getUTCDate() + windowDays);
+  const candidates = await actual.getTransactions(otherAccountId, iso(from), iso(to));
+  return candidates.find((t) => t.amount === -amount && t.payee === pendingPayeeId) || null;
+}
+
+app.post('/transfers/push', async (req, res) => {
+  try {
+    const { account_id, transactions } = req.body;
+    if (!account_id || !Array.isArray(transactions)) {
+      return res.status(400).json({ error: 'need account_id and transactions[]' });
+    }
+    await actual.sync();
+    const pendingPayeeId = await getPendingPayeeId();
+    const payees = await actual.getPayees();
+    const accounts = await actual.getAccounts();
+    const otherAccountIds = accounts.map((a) => a.id).filter((id) => id !== account_id);
+
+    const results = [];
+    for (const t of transactions) {
+      let mirror = null;
+      let mirrorAccountId = null;
+      for (const otherId of otherAccountIds) {
+        mirror = await findMirror({
+          otherAccountId: otherId,
+          date: t.date,
+          amount: t.amount,
+          pendingPayeeId,
+        });
+        if (mirror) { mirrorAccountId = otherId; break; }
+      }
+
+      if (mirror) {
+        const otherTransferPayeeId = transferPayeeForAccount(payees, mirrorAccountId);
+        await actual.deleteTransaction(mirror.id);
+        await actual.importTransactions(account_id, [{
+          date: t.date,
+          amount: t.amount,
+          payee: otherTransferPayeeId,
+          notes: t.notes,
+          imported_id: t.imported_id,
+          cleared: true,
+        }]);
+        results.push({ imported_id: t.imported_id, linked: true, with_account: mirrorAccountId });
+      } else {
+        await actual.importTransactions(account_id, [{
+          date: t.date,
+          amount: t.amount,
+          payee: pendingPayeeId,
+          notes: t.notes,
+          imported_id: t.imported_id,
+          cleared: true,
+        }]);
+        results.push({ imported_id: t.imported_id, linked: false });
+      }
+    }
+    await actual.sync();
+    res.json({ ok: true, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/transactions', async (req, res) => {
   try {
     const { account_id, transactions } = req.body;

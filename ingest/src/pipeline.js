@@ -3,8 +3,8 @@ import path from 'node:path';
 import { extractText, PdfError } from './pdf.js';
 import { parseStatement, GeminiError } from './gemini.js';
 import { importedId, reconcile } from './dedup.js';
-import { loadBanksConfig, accountNameFor, interpolateEnv } from './config.js';
-import { postTransactions, resolveOrCreateAccountRest, ActualError } from './actual.js';
+import { loadBanksConfig, accountNameFor, interpolateEnv, isSelfTransfer } from './config.js';
+import { postTransactions, resolveOrCreateAccountRest, pushSelfTransfersRest, ActualError } from './actual.js';
 
 function pushMode(env) {
   return env.ACTUAL_PUSH_MODE || (env.ACTUAL_API_URL ? 'rest' : 'direct');
@@ -53,6 +53,18 @@ async function pushTransactions({ env, accountId, transactions }) {
   });
 }
 
+async function pushSelfTransfers({ env, accountId, transactions }) {
+  if (pushMode(env) === 'direct') {
+    const { pushSelfTransfersDirect } = await import('./actual-direct.js');
+    return pushSelfTransfersDirect({ env, accountId, transactions });
+  }
+  return pushSelfTransfersRest({
+    apiUrl: env.ACTUAL_API_URL || 'http://actual_api:5007',
+    accountId,
+    transactions,
+  });
+}
+
 function detectBankFromText(banksConfig, text) {
   for (const [key, cfg] of Object.entries(banksConfig)) {
     for (const marker of (cfg.markers || [])) {
@@ -78,8 +90,9 @@ export async function ingestBuffer(buf, {
   banksConfigPath,
   filenameHint = null,
 } = {}) {
-  const banksRaw = await loadBanksConfig(banksConfigPath);
+  const { banks: banksRaw, owner } = await loadBanksConfig(banksConfigPath);
   const banksConfig = interpolateEnv(banksRaw, env);
+  const ownerTokens = owner?.name_tokens || [];
 
   const bankByFilename = bankFromFilename(banksConfig, filenameHint);
   const guesses = bankByFilename
@@ -140,7 +153,14 @@ export async function ingestBuffer(buf, {
   const cats = dryRun ? null : await categoryMap(env);
 
   let weakHashRows = 0;
-  const payload = statement.transactions.map((t) => {
+  const regular = [];
+  const selfTransfers = [];
+  for (const t of statement.transactions) {
+    const self = isSelfTransfer({
+      ownerTokens,
+      payeeClean: t.payee_clean,
+      description: t.description,
+    });
     const { id, tier } = importedId({
       bank,
       date: t.date,
@@ -158,23 +178,32 @@ export async function ingestBuffer(buf, {
       imported_id: id,
       cleared: true,
     };
+    if (self) {
+      selfTransfers.push(txn);
+      continue;
+    }
     if (cats && t.category && t.category !== 'Unknown') {
       const cid = cats[t.category];
       if (cid) txn.category = cid;
     }
-    return txn;
-  });
+    regular.push(txn);
+  }
   if (weakHashRows > 0) {
-    console.warn(`[pipeline] ${weakHashRows}/${payload.length} rows use description-only hash fallback; dedup is LLM-sensitive for those`);
+    console.warn(`[pipeline] ${weakHashRows}/${statement.transactions.length} rows use description-only hash fallback; dedup is LLM-sensitive for those`);
   }
 
   if (dryRun) {
-    return { bank, accountName, statement, count: payload.length, reconcile: rec, transactions: payload, pushed: false };
+    return { bank, accountName, statement, count: regular.length + selfTransfers.length, selfTransfers: selfTransfers.length, reconcile: rec, transactions: [...regular, ...selfTransfers], pushed: false };
   }
 
-  await pushTransactions({ env, accountId, transactions: payload });
+  if (regular.length > 0) {
+    await pushTransactions({ env, accountId, transactions: regular });
+  }
+  if (selfTransfers.length > 0) {
+    await pushSelfTransfers({ env, accountId, transactions: selfTransfers });
+  }
 
-  return { bank, accountName, accountId, statement, count: payload.length, reconcile: rec, pushed: true };
+  return { bank, accountName, accountId, statement, count: regular.length + selfTransfers.length, selfTransfers: selfTransfers.length, reconcile: rec, pushed: true };
 }
 
 export async function ingestPdf(pdfPath, opts = {}) {
