@@ -33,11 +33,7 @@ Next:
     -c $ROOT/deploy/fly/actual-server/fly.toml \\
     --app $FLY_APP_PREFIX-server
 
-  fly deploy --remote-only \\
-    -c $ROOT/deploy/fly/actual-ingest/fly.toml \\
-    --app $FLY_APP_PREFIX-ingest \\
-    --dockerfile ingest/Dockerfile \\
-    $ROOT/ingest
+  (cd $ROOT/ingest && fly deploy --remote-only --app $FLY_APP_PREFIX-ingest)
 
 Then convert ingest to a scheduled machine:
   fly machine list --app $FLY_APP_PREFIX-ingest

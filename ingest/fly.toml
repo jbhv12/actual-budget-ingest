@@ -1,7 +1,7 @@
 primary_region = "sin"
 
 [build]
-  dockerfile = "../../../ingest/Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
   INGEST_SOURCE = "gmail"
