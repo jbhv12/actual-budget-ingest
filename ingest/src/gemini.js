@@ -1,12 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 
-export const BUDGET_CATEGORIES = [
-  'Essentials',
-  'Leisure & Trips',
-  'Wealth & Savings',
-  'True Expenses',
-];
+export const BUDGET_CATEGORIES = ['Food', 'General', 'Bills', 'Bills (Flexible)', 'Savings'];
 
 const transactionSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'),
@@ -60,7 +55,7 @@ type Output = {
     amount_paise: number;
     balance_paise: number | null;
     reference: string | null;
-    category: "Essentials" | "Leisure & Trips" | "Wealth & Savings" | "True Expenses" | "Unknown";
+    category: "Food" | "General" | "Bills" | "Bills (Flexible)" | "Savings" | "Unknown";
   }>;
 };
 
@@ -73,20 +68,21 @@ Rules:
 - Return {"error": "<reason>"} if any required field is uncertain.
 - No markdown fences in your response.
 
-Category guide (pick exactly one per transaction):
-- Essentials: rent, EMI, electricity/water/gas bills, mobile and internet bills,
-  base groceries, daily commute (fuel, metro, cabs for work).
-- Leisure & Trips: dining out, restaurants, bars, food delivery, OTT subscriptions,
-  vacations, holiday travel, travel-food, hobbies, non-essential shopping (clothes,
-  gadgets, home decor), gifts.
-- Wealth & Savings: SIPs, mutual-fund purchases, stock/broker transfers, FD/RD,
-  PPF/EPF, emergency-fund top-ups, retirement contributions, insurance premiums
-  with an investment component.
-- True Expenses: medical bills and pharmacy, vehicle service and repairs, home/
-  appliance repair, annual subscriptions, insurance renewals (pure protection),
-  government fees and filings, bank fees. Infrequent but necessary.
-- Unknown: salary, interest credits, refunds, inter-account self-transfers, or
-  any row where none of the four fit confidently.
+Category guide (pick exactly one per transaction). These match Actual Budget's
+default category template:
+- Food: groceries, restaurants, dining out, food delivery (Zomato, Swiggy),
+  cafes, bars.
+- General: non-essential shopping (clothes, gadgets, home decor), hobbies,
+  gifts, entertainment, OTT subscriptions, travel for leisure, medical,
+  pharmacy, vehicle service, bank fees, annual subscriptions, and anything
+  else that is a real expense but not clearly Food/Bills/Savings.
+- Bills: fixed monthly bills — rent, EMI, electricity, water, gas, mobile,
+  internet, insurance renewals.
+- Bills (Flexible): variable but recurring bills — fuel, commute, cabs/metro.
+- Savings: SIPs, mutual funds, FD/RD, stock/broker transfers, PPF/EPF,
+  retirement contributions, emergency-fund top-ups.
+- Unknown: salary, interest credits, refunds, inter-account self-transfers,
+  or any row where none of the above fits confidently.
 `;
 }
 
