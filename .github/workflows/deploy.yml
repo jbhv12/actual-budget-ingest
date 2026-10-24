@@ -25,7 +25,7 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event.inputs.app == 'all' || github.event.inputs.app == 'server' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - run: flyctl deploy --remote-only -c deploy/fly/actual-server/fly.toml --app ${{ vars.FLY_APP_PREFIX }}-server
         env:
@@ -36,7 +36,7 @@ jobs:
     needs: deploy-server
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Deploy ingest
         working-directory: ingest
