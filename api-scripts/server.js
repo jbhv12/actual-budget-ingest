@@ -14,7 +14,7 @@ if (!ACTUAL_PASSWORD) {
   process.exit(1);
 }
 
-async function discoverSyncId() {
+async function listRemoteBudgets() {
   const base = ACTUAL_SERVER_URL.replace(/\/$/, '');
   const loginResp = await fetch(`${base}/account/login`, {
     method: 'POST',
@@ -27,23 +27,30 @@ async function discoverSyncId() {
   const filesResp = await fetch(`${base}/sync/list-user-files`, {
     headers: { 'x-actual-token': token },
   });
-  const filesBody = await filesResp.json();
-  const files = filesBody?.data || [];
-  if (files.length === 0) {
-    throw new Error(
-      `No budget on ${ACTUAL_SERVER_URL}. Visit the UI, click "Create new file", then restart this service.`,
-    );
-  }
-  return files[0].groupId;
+  return (await filesResp.json())?.data || [];
 }
-
-const syncId = ACTUAL_SYNC_ID || await discoverSyncId();
 
 const DATA_DIR = '/data/budget-cache';
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-console.log(`Initializing Actual client (syncId=${syncId})...`);
+console.log('Initializing Actual client...');
 await actual.init({ dataDir: DATA_DIR, serverURL: ACTUAL_SERVER_URL, password: ACTUAL_PASSWORD });
+
+let syncId = ACTUAL_SYNC_ID;
+if (!syncId) {
+  const budgets = await listRemoteBudgets();
+  if (budgets.length === 0) {
+    console.log('No budget on server. Creating "Finances"...');
+    await actual.runImport('Finances', async () => {});
+    const after = await listRemoteBudgets();
+    if (after.length === 0) throw new Error('runImport did not create a remote budget');
+    syncId = after[0].groupId;
+  } else {
+    syncId = budgets[0].groupId;
+  }
+}
+
+console.log(`Loading budget (syncId=${syncId})...`);
 await actual.downloadBudget(syncId);
 console.log('Budget loaded.');
 
