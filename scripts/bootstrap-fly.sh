@@ -9,7 +9,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 create_app() {
   local app="$1"
-  if fly apps show "$app" >/dev/null 2>&1; then
+  if fly apps list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$app"; then
     echo "    $app already exists"
   else
     fly apps create "$app" --org "$FLY_ORG"

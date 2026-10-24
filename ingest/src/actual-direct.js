@@ -3,8 +3,24 @@ import fs from 'node:fs';
 
 let initialized = false;
 
-async function discoverSyncId({ serverURL, password }) {
-  const loginResp = await fetch(`${serverURL.replace(/\/$/, '')}/account/login`, {
+async function ensureBootstrapped({ serverURL, password }) {
+  const base = serverURL.replace(/\/$/, '');
+  const resp = await fetch(`${base}/account/needs-bootstrap`);
+  const body = await resp.json();
+  if (body?.data?.bootstrapped === false) {
+    const bootResp = await fetch(`${base}/account/bootstrap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const bootBody = await bootResp.json();
+    if (bootBody?.status !== 'ok') throw new Error(`bootstrap failed: ${JSON.stringify(bootBody)}`);
+  }
+}
+
+async function listRemoteBudgets({ serverURL, password }) {
+  const base = serverURL.replace(/\/$/, '');
+  const loginResp = await fetch(`${base}/account/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),
@@ -12,17 +28,10 @@ async function discoverSyncId({ serverURL, password }) {
   const loginBody = await loginResp.json();
   const token = loginBody?.data?.token;
   if (!token) throw new Error(`login to ${serverURL} failed: ${JSON.stringify(loginBody)}`);
-  const filesResp = await fetch(`${serverURL.replace(/\/$/, '')}/sync/list-user-files`, {
+  const filesResp = await fetch(`${base}/sync/list-user-files`, {
     headers: { 'x-actual-token': token },
   });
-  const filesBody = await filesResp.json();
-  const files = filesBody?.data || [];
-  if (files.length === 0) {
-    throw new Error(
-      `no budget on ${serverURL}. Visit the UI and click "Create new file", then re-run.`,
-    );
-  }
-  return files[0].groupId;
+  return (await filesResp.json())?.data || [];
 }
 
 export async function initDirect({ env = process.env } = {}) {
@@ -33,9 +42,21 @@ export async function initDirect({ env = process.env } = {}) {
   if (!serverURL || !password) {
     throw new Error('ACTUAL_SERVER_URL and ACTUAL_PASSWORD are required for direct mode');
   }
-  const syncId = env.ACTUAL_SYNC_ID || (await discoverSyncId({ serverURL, password }));
+  await ensureBootstrapped({ serverURL, password });
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   await actual.init({ dataDir, serverURL, password });
+  let syncId = env.ACTUAL_SYNC_ID;
+  if (!syncId) {
+    const budgets = await listRemoteBudgets({ serverURL, password });
+    if (budgets.length === 0) {
+      await actual.runImport('Finances', async () => {});
+      const after = await listRemoteBudgets({ serverURL, password });
+      if (after.length === 0) throw new Error('runImport did not create a remote budget');
+      syncId = after[0].groupId;
+    } else {
+      syncId = budgets[0].groupId;
+    }
+  }
   await actual.downloadBudget(syncId);
   initialized = true;
 }
