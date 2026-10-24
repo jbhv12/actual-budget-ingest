@@ -52,5 +52,5 @@ services:
       - ./ingest/banks.yaml:/app/banks.yaml:ro
     depends_on:
       actual_api:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped

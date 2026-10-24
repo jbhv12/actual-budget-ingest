@@ -14,16 +14,47 @@ if (!ACTUAL_PASSWORD) {
   process.exit(1);
 }
 
+async function ensureBootstrapped() {
+  const base = ACTUAL_SERVER_URL.replace(/\/$/, '');
+  const resp = await fetch(`${base}/account/needs-bootstrap`);
+  const body = await resp.json();
+  if (body?.data?.bootstrapped === false) {
+    console.log('server not bootstrapped; posting /account/bootstrap');
+    const bootResp = await fetch(`${base}/account/bootstrap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: ACTUAL_PASSWORD }),
+    });
+    const bootBody = await bootResp.json();
+    if (bootBody?.status !== 'ok') throw new Error(`bootstrap failed: ${JSON.stringify(bootBody)}`);
+  }
+}
+
+async function serverLogin() {
+  await ensureBootstrapped();
+  const base = ACTUAL_SERVER_URL.replace(/\/$/, '');
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const resp = await fetch(`${base}/account/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: ACTUAL_PASSWORD }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (body?.data?.token) return body.data.token;
+    if (resp.status === 429 || body?.reason === 'too-many-requests') {
+      const wait = Math.min(60, 5 * (attempt + 1));
+      console.log(`login rate-limited; retry in ${wait}s (attempt ${attempt + 1}/12)`);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      continue;
+    }
+    throw new Error(`login failed: ${JSON.stringify(body)}`);
+  }
+  throw new Error('login still rate-limited after 12 attempts');
+}
+
 async function listRemoteBudgets() {
   const base = ACTUAL_SERVER_URL.replace(/\/$/, '');
-  const loginResp = await fetch(`${base}/account/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: ACTUAL_PASSWORD }),
-  });
-  const loginBody = await loginResp.json();
-  const token = loginBody?.data?.token;
-  if (!token) throw new Error(`login failed: ${JSON.stringify(loginBody)}`);
+  const token = await serverLogin();
   const filesResp = await fetch(`${base}/sync/list-user-files`, {
     headers: { 'x-actual-token': token },
   });
@@ -34,7 +65,25 @@ const DATA_DIR = '/data/budget-cache';
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 console.log('Initializing Actual client...');
-await actual.init({ dataDir: DATA_DIR, serverURL: ACTUAL_SERVER_URL, password: ACTUAL_PASSWORD });
+await ensureBootstrapped();
+async function initWithRetry() {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    try {
+      await actual.init({ dataDir: DATA_DIR, serverURL: ACTUAL_SERVER_URL, password: ACTUAL_PASSWORD });
+      return;
+    } catch (err) {
+      if (err?.code === 'too-many-requests') {
+        const wait = Math.min(60, 5 * (attempt + 1));
+        console.log(`login rate-limited; retry in ${wait}s (attempt ${attempt + 1}/12)`);
+        await new Promise((r) => setTimeout(r, wait * 1000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('login still rate-limited after 12 attempts');
+}
+await initWithRetry();
 
 let syncId = ACTUAL_SYNC_ID;
 if (!syncId) {
