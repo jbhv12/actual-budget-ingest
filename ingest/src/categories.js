@@ -1,6 +1,11 @@
 import * as actual from '@actual-app/api';
 
-export const BUDGET_CATEGORIES = ['Essentials', 'Leisure', 'Investments', 'Maintenance'];
+export const BUDGET_CATEGORIES = [
+  'Essentials',
+  'Leisure & Trips',
+  'Wealth & Savings',
+  'True Expenses',
+];
 export const CATEGORY_GROUP = 'Spending';
 
 let cache = null;

@@ -1,7 +1,12 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 
-export const BUDGET_CATEGORIES = ['Essentials', 'Leisure', 'Investments', 'Maintenance'];
+export const BUDGET_CATEGORIES = [
+  'Essentials',
+  'Leisure & Trips',
+  'Wealth & Savings',
+  'True Expenses',
+];
 
 const transactionSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD'),
@@ -33,7 +38,12 @@ export class GeminiError extends Error {
   }
 }
 
-const PROMPT = `You are a precise parser of Indian bank statements. The user will paste the raw text extracted from an HDFC Bank statement PDF.
+function buildPrompt({ bankLabel, bankKind }) {
+  const isCC = bankKind === 'credit_card';
+  const signRule = isCC
+    ? 'For a credit card statement: purchases/charges are NEGATIVE (money spent); payments/credits/refunds are POSITIVE.'
+    : 'For a bank account: withdrawals/debits are NEGATIVE; deposits/credits are POSITIVE.';
+  return `You are a precise parser of Indian bank and credit-card statements. The user will paste the raw text extracted from a ${bankLabel} statement PDF (kind: ${bankKind}).
 
 Return a SINGLE JSON object (no markdown fence, no commentary) matching:
 
@@ -50,30 +60,37 @@ type Output = {
     amount_paise: number;
     balance_paise: number | null;
     reference: string | null;
-    category: "Essentials" | "Leisure" | "Investments" | "Maintenance" | "Unknown";
+    category: "Essentials" | "Leisure & Trips" | "Wealth & Savings" | "True Expenses" | "Unknown";
   }>;
 };
 
 Rules:
 - Monetary values are paise (integer, INR * 100). ₹1,234.56 -> 123456.
-- Debits NEGATIVE, credits POSITIVE. Dates ISO (YYYY-MM-DD).
-- Return "error": "<reason>" if any required field is uncertain.
+- ${signRule}
+- Dates ISO (YYYY-MM-DD).
+- account_last4 is the trailing 4 digits of the account/card number shown on the statement header.
+- balance_paise is the row's running balance when the statement shows one (typical for savings); set null when absent (typical for credit card statements).
+- Return {"error": "<reason>"} if any required field is uncertain.
 - No markdown fences in your response.
 
-Category guide (pick one per transaction):
-- Essentials: groceries, utility bills, fuel, pharmacy, rent/EMI, mobile, internet,
-  core food. Debit transactions required for daily life.
-- Leisure: restaurants, dining out, OTT subscriptions, entertainment, travel for
-  non-work, shopping for non-essentials, hobbies, gifts.
-- Investments: SIPs, mutual-fund purchases, FD/RD, equity broker transfers,
-  insurance premiums with investment component, PPF/EPF.
-- Maintenance: home repairs, vehicle service, appliance repair, medical check-ups,
-  cleaning/pest services, bank fees, govt filings.
-- Unknown: credits/refunds, inter-account transfers, salary, interest, or any
-  transaction where none of the four categories clearly fits.
+Category guide (pick exactly one per transaction):
+- Essentials: rent, EMI, electricity/water/gas bills, mobile and internet bills,
+  base groceries, daily commute (fuel, metro, cabs for work).
+- Leisure & Trips: dining out, restaurants, bars, food delivery, OTT subscriptions,
+  vacations, holiday travel, travel-food, hobbies, non-essential shopping (clothes,
+  gadgets, home decor), gifts.
+- Wealth & Savings: SIPs, mutual-fund purchases, stock/broker transfers, FD/RD,
+  PPF/EPF, emergency-fund top-ups, retirement contributions, insurance premiums
+  with an investment component.
+- True Expenses: medical bills and pharmacy, vehicle service and repairs, home/
+  appliance repair, annual subscriptions, insurance renewals (pure protection),
+  government fees and filings, bank fees. Infrequent but necessary.
+- Unknown: salary, interest credits, refunds, inter-account self-transfers, or
+  any row where none of the four fit confidently.
 `;
+}
 
-export async function parseStatement(text, { apiKey, model = 'gemini-2.5-flash' } = {}) {
+export async function parseStatement(text, { apiKey, model = 'gemini-2.5-flash', bankLabel = 'the configured bank', bankKind = 'savings' } = {}) {
   if (!apiKey) throw new GeminiError('missing GEMINI_API_KEY', 'no-api-key');
 
   const genAI = new GoogleGenerativeAI(apiKey);
@@ -85,9 +102,10 @@ export async function parseStatement(text, { apiKey, model = 'gemini-2.5-flash' 
     },
   });
 
+  const prompt = buildPrompt({ bankLabel, bankKind });
   let resp;
   try {
-    resp = await client.generateContent([{ text: PROMPT }, { text }]);
+    resp = await client.generateContent([{ text: prompt }, { text }]);
   } catch (err) {
     throw new GeminiError(`gemini API error: ${err.message}`, 'api-error');
   }
@@ -115,4 +133,4 @@ export async function parseStatement(text, { apiKey, model = 'gemini-2.5-flash' 
   return result.data;
 }
 
-export const _test = { statementSchema, transactionSchema, PROMPT };
+export const _test = { statementSchema, transactionSchema, buildPrompt };

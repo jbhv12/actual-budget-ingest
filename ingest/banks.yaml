@@ -1,6 +1,31 @@
 banks:
-  hdfc:
+  hdfc_savings:
+    label: "HDFC Bank"
+    kind: savings
     password_env: HDFC_PDF_PASSWORD
-    markers:
-      - "HDFC Bank"
+    markers: ["HDFC Bank"]
     account_name: "HDFC Savings"
+
+  # Add more banks by copying the block above and changing the fields.
+  # Example — HDFC credit card:
+  #
+  # hdfc_cc:
+  #   label: "HDFC Credit Card"
+  #   kind: credit_card
+  #   password_env: HDFC_CC_PDF_PASSWORD
+  #   markers: ["HDFC Bank Credit Card", "Statement of Account"]
+  #   account_name: "HDFC Credit Card"
+  #
+  # icici_savings:
+  #   label: "ICICI Bank"
+  #   kind: savings
+  #   password_env: ICICI_PDF_PASSWORD
+  #   markers: ["ICICI Bank"]
+  #   account_name: "ICICI Savings"
+  #
+  # stanc_cc:
+  #   label: "Standard Chartered Credit Card"
+  #   kind: credit_card
+  #   password_env: STANC_CC_PDF_PASSWORD
+  #   markers: ["Standard Chartered"]
+  #   account_name: "StanC Credit Card"

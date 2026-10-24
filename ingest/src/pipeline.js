@@ -18,14 +18,27 @@ async function resolveAccountId({ env, name }) {
   return resolveOrCreateAccountRest({ apiUrl: env.ACTUAL_API_URL, name });
 }
 
-async function categoryMapIfDirect(env) {
-  if (pushMode(env) !== 'direct') return null;
-  const [{ initDirect }, { ensureCategories }] = await Promise.all([
-    import('./actual-direct.js'),
-    import('./categories.js'),
-  ]);
-  await initDirect({ env });
-  return ensureCategories();
+async function categoryMap(env) {
+  const { BUDGET_CATEGORIES } = await import('./categories.js');
+  if (pushMode(env) === 'direct') {
+    const [{ initDirect }, { ensureCategories }] = await Promise.all([
+      import('./actual-direct.js'),
+      import('./categories.js'),
+    ]);
+    await initDirect({ env });
+    return ensureCategories();
+  }
+  const apiUrl = (env.ACTUAL_API_URL || 'http://actual_api:5007').replace(/\/$/, '');
+  const resp = await fetch(`${apiUrl}/categories/ensure`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group: 'Spending', names: BUDGET_CATEGORIES }),
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`categories/ensure failed: ${resp.status} ${body}`);
+  }
+  return resp.json();
 }
 
 async function pushTransactions({ env, accountId, transactions }) {
@@ -40,15 +53,22 @@ async function pushTransactions({ env, accountId, transactions }) {
   });
 }
 
-function detectBank(text) {
-  if (/HDFC Bank/i.test(text)) return 'hdfc';
+function detectBankFromText(banksConfig, text) {
+  for (const [key, cfg] of Object.entries(banksConfig)) {
+    for (const marker of (cfg.markers || [])) {
+      if (new RegExp(marker, 'i').test(text)) return key;
+    }
+  }
   return null;
 }
 
-function bankFromFilename(filename) {
+function bankFromFilename(banksConfig, filename) {
   if (!filename) return null;
-  const base = path.basename(filename);
-  return /^(hdfc|icici|stanc)/i.exec(base)?.[1]?.toLowerCase() || null;
+  const base = path.basename(filename).toLowerCase();
+  for (const key of Object.keys(banksConfig)) {
+    if (base.startsWith(key.replace(/_/g, '')) || base.startsWith(key)) return key;
+  }
+  return null;
 }
 
 export async function ingestBuffer(buf, {
@@ -61,7 +81,7 @@ export async function ingestBuffer(buf, {
   const banksRaw = await loadBanksConfig(banksConfigPath);
   const banksConfig = interpolateEnv(banksRaw, env);
 
-  const bankByFilename = bankFromFilename(filenameHint);
+  const bankByFilename = bankFromFilename(banksConfig, filenameHint);
   const guesses = bankByFilename
     ? [bankByFilename, ...Object.keys(banksConfig).filter((b) => b !== bankByFilename)]
     : Object.keys(banksConfig);
@@ -79,9 +99,13 @@ export async function ingestBuffer(buf, {
     }
     try {
       const out = await extractText(buf, { password });
-      const sniff = detectBank(out.text);
+      const sniff = detectBankFromText(banksConfig, out.text);
       if (sniff && sniff !== candidate) {
-        lastErr = new Error(`decrypt succeeded with ${candidate} password but PDF looks like ${sniff}`);
+        lastErr = new Error(`decrypt succeeded with ${candidate} password but PDF text matched ${sniff}`);
+        continue;
+      }
+      if (!sniff && Object.keys(banksConfig).length > 1) {
+        lastErr = new Error(`decrypted with ${candidate} password but no bank marker matched the PDF text`);
         continue;
       }
       text = out.text;
@@ -94,7 +118,12 @@ export async function ingestBuffer(buf, {
   }
   if (!bank) throw lastErr || new Error('could not identify bank or decrypt PDF');
 
-  const statement = await parseStatement(text, { apiKey: env.GEMINI_API_KEY });
+  const bankCfg = banksConfig[bank];
+  const statement = await parseStatement(text, {
+    apiKey: env.GEMINI_API_KEY,
+    bankLabel: bankCfg.label || bank,
+    bankKind: bankCfg.kind || 'savings',
+  });
 
   const rec = reconcile(statement);
   if (!rec.ok && !force) {
@@ -108,7 +137,7 @@ export async function ingestBuffer(buf, {
 
   const accountName = accountNameFor(banksConfig, bank);
   const accountId = dryRun ? null : await resolveAccountId({ env, name: accountName });
-  const categoryMap = dryRun ? null : await categoryMapIfDirect(env);
+  const cats = dryRun ? null : await categoryMap(env);
 
   let weakHashRows = 0;
   const payload = statement.transactions.map((t) => {
@@ -129,8 +158,8 @@ export async function ingestBuffer(buf, {
       imported_id: id,
       cleared: true,
     };
-    if (categoryMap && t.category && t.category !== 'Unknown') {
-      const cid = categoryMap[t.category];
+    if (cats && t.category && t.category !== 'Unknown') {
+      const cid = cats[t.category];
       if (cid) txn.category = cid;
     }
     return txn;
