@@ -3,11 +3,19 @@ import path from 'node:path';
 import { extractText, PdfError } from './pdf.js';
 import { parseStatement, GeminiError } from './gemini.js';
 import { importedId, reconcile } from './dedup.js';
-import { loadBanksConfig, resolveAccount, interpolateEnv } from './config.js';
-import { postTransactions, ActualError } from './actual.js';
+import { loadBanksConfig, accountNameFor, interpolateEnv } from './config.js';
+import { postTransactions, resolveOrCreateAccountRest, ActualError } from './actual.js';
 
 function pushMode(env) {
   return env.ACTUAL_PUSH_MODE || (env.ACTUAL_API_URL ? 'rest' : 'direct');
+}
+
+async function resolveAccountId({ env, name }) {
+  if (pushMode(env) === 'direct') {
+    const { resolveOrCreateAccount } = await import('./actual-direct.js');
+    return resolveOrCreateAccount({ env, name });
+  }
+  return resolveOrCreateAccountRest({ apiUrl: env.ACTUAL_API_URL, name });
 }
 
 async function categoryMapIfDirect(env) {
@@ -98,14 +106,14 @@ export async function ingestBuffer(buf, {
     throw err;
   }
 
-  const accountId = resolveAccount(banksConfig, bank, statement.account_last4);
+  const accountName = accountNameFor(banksConfig, bank);
+  const accountId = dryRun ? null : await resolveAccountId({ env, name: accountName });
   const categoryMap = dryRun ? null : await categoryMapIfDirect(env);
 
   let weakHashRows = 0;
   const payload = statement.transactions.map((t) => {
     const { id, tier } = importedId({
       bank,
-      account_last4: statement.account_last4,
       date: t.date,
       amount_paise: t.amount_paise,
       reference: t.reference,
@@ -132,12 +140,12 @@ export async function ingestBuffer(buf, {
   }
 
   if (dryRun) {
-    return { bank, accountId, statement, count: payload.length, reconcile: rec, transactions: payload, pushed: false };
+    return { bank, accountName, statement, count: payload.length, reconcile: rec, transactions: payload, pushed: false };
   }
 
   await pushTransactions({ env, accountId, transactions: payload });
 
-  return { bank, accountId, statement, count: payload.length, reconcile: rec, pushed: true };
+  return { bank, accountName, accountId, statement, count: payload.length, reconcile: rec, pushed: true };
 }
 
 export async function ingestPdf(pdfPath, opts = {}) {
@@ -145,8 +153,8 @@ export async function ingestPdf(pdfPath, opts = {}) {
   return ingestBuffer(buf, { ...opts, filenameHint: opts.filenameHint ?? pdfPath });
 }
 
-export async function moveToProcessed(pdfPath, baseDir, period) {
-  const month = period?.to?.slice(0, 7) || 'unknown';
+export async function moveToProcessed(pdfPath, baseDir, result) {
+  const month = result?.statement?.statement_period?.to?.slice(0, 7) || 'unknown';
   const dest = path.join(baseDir, 'processed', month);
   await mkdir(dest, { recursive: true });
   const target = path.join(dest, path.basename(pdfPath));

@@ -14,7 +14,7 @@ const transactionSchema = z.object({
 });
 
 const statementSchema = z.object({
-  account_last4: z.string().regex(/^\d{4}$/, '4 digits'),
+  account_last4: z.string().regex(/^\d{4,20}$/, 'digits').transform((s) => s.slice(-4)),
   currency: z.literal('INR'),
   statement_period: z.object({
     from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

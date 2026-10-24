@@ -8,22 +8,13 @@ export async function loadBanksConfig(path = '/app/banks.yaml') {
   return parsed.banks;
 }
 
-export function resolveAccount(banksConfig, bank, account_last4) {
+export function accountNameFor(banksConfig, bank) {
   const cfg = banksConfig[bank];
   if (!cfg) throw new Error(`unknown bank: ${bank}`);
-  const acct = (cfg.accounts || []).find((a) => a.last4 === account_last4);
-  if (!acct) {
-    throw new Error(
-      `no mapping for ${bank} account ending ${account_last4}; add it to banks.yaml`,
-    );
+  if (!cfg.account_name) {
+    throw new Error(`banks.yaml[${bank}].account_name is required`);
   }
-  const id = String(acct.actual_account_id || '');
-  if (!id || id.startsWith('REPLACE_ME') || id.startsWith('${')) {
-    throw new Error(
-      `${bank}:${account_last4} is mapped to a placeholder; fill in actual_account_id in banks.yaml or export the matching env var`,
-    );
-  }
-  return id;
+  return cfg.account_name;
 }
 
 const ENV_PATTERN = /\$\{([A-Z0-9_]+)\}/g;

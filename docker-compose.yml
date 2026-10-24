@@ -26,7 +26,7 @@ services:
     environment:
       - ACTUAL_SERVER_URL=http://actual_server:5006
       - ACTUAL_PASSWORD=${ACTUAL_PASSWORD:?ACTUAL_PASSWORD must be set in .env}
-      - ACTUAL_SYNC_ID=${ACTUAL_SYNC_ID:?ACTUAL_SYNC_ID must be set in .env}
+      - ACTUAL_SYNC_ID=${ACTUAL_SYNC_ID:-}
     volumes:
       - ./api-scripts/budget-cache:/data/budget-cache
     depends_on:
@@ -40,7 +40,6 @@ services:
       - ACTUAL_API_URL=http://actual_api:5007
       - GEMINI_API_KEY=${GEMINI_API_KEY:?GEMINI_API_KEY must be set in .env}
       - HDFC_PDF_PASSWORD=${HDFC_PDF_PASSWORD:?HDFC_PDF_PASSWORD must be set in .env}
-      - HDFC_SAVINGS_ACCOUNT_ID=${HDFC_SAVINGS_ACCOUNT_ID:-}
       - INGEST_SOURCE=${INGEST_SOURCE:-folder}
       - INGEST_WATCH_DIR=/data/pdfs
       - GMAIL_CLIENT_ID=${GMAIL_CLIENT_ID:-}

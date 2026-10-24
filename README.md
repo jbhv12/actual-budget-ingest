@@ -33,19 +33,13 @@ cd actual
 cp .env.example .env             # fill in: ACTUAL_PASSWORD, GEMINI_API_KEY, HDFC_PDF_PASSWORD
 docker compose up -d actual_server
 
-# Open http://localhost:5006, create a budget, create an account (e.g. "HDFC Savings").
-# Grab the sync id (= groupId) and your account id:
-TOKEN=$(curl -s -X POST http://localhost:5006/account/login \
-  -H 'Content-Type: application/json' \
-  -d "{\"password\":\"$(grep ACTUAL_PASSWORD .env | cut -d= -f2)\"}" | jq -r .data.token)
-curl -s http://localhost:5006/sync/list-user-files -H "x-actual-token: $TOKEN" | jq
-# -> paste the groupId into .env as ACTUAL_SYNC_ID
+# One-time manual step (Actual's API can't create a budget programmatically):
+#   open http://localhost:5006, log in with ACTUAL_PASSWORD, click "Create new file".
+# Everything else is automated:
+#   - sync-id auto-discovered from the server
+#   - account "HDFC Savings" auto-created on first ingest
 
-docker compose up -d actual_api
-curl http://localhost:5007/accounts
-# -> paste the account id into ingest/banks.yaml under hdfc.accounts[0].actual_account_id
-
-docker compose up -d actual_ingest
+docker compose up -d
 cp ~/Downloads/hdfc_oct_2026.pdf fixtures/pdfs/
 docker compose logs -f actual_ingest    # watch extraction + push
 ```

@@ -24,6 +24,9 @@ async function decrypt(pdfPath, password, outPath) {
     if (/invalid password/i.test(err.stderr || '')) {
       throw new PdfError('wrong password', 'wrong-password');
     }
+    // qpdf exits 3 on warnings (malformed-but-recoverable PDFs). The output
+    // file is still produced and usable.
+    if (err.code === 3) return;
     throw new PdfError(`qpdf failed: ${err.stderr || err.message}`, 'qpdf-failed');
   }
 }

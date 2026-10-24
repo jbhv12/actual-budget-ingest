@@ -1,13 +1,6 @@
-# Maps a bank + last-4 digits of the account to an Actual account UUID.
-# Create the account in the Actual UI first, then run:
-#   curl http://localhost:5007/accounts
-# ...and paste the id below.
-
 banks:
   hdfc:
     password_env: HDFC_PDF_PASSWORD
     markers:
       - "HDFC Bank"
-    accounts:
-      - last4: "0000"
-        actual_account_id: "REPLACE_ME_WITH_ACCOUNT_UUID"
+    account_name: "HDFC Savings"

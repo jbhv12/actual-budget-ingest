@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export function importedId({ bank, account_last4, date, amount_paise, reference, balance_paise, description }) {
+export function importedId({ bank, date, amount_paise, reference, balance_paise, description }) {
   let fingerprint;
   let tier;
   if (reference && reference.trim()) {
@@ -14,7 +14,7 @@ export function importedId({ bank, account_last4, date, amount_paise, reference,
     tier = 'description';
   }
   const id = createHash('sha256')
-    .update(`${bank}|${account_last4}|${date}|${amount_paise}|${fingerprint}`)
+    .update(`${bank}|${date}|${amount_paise}|${fingerprint}`)
     .digest('hex')
     .slice(0, 24);
   return { id, tier };
